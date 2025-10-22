@@ -262,35 +262,181 @@ def pricer(arbre):
 # ======================
 # 🔹 Black–Scholes
 # ======================
-def BS(S, K, T, r, sigma, type_op):
+def BS(S, K, T, r, sigma, type_op, exercice="EU"):
+    """
+    Calcule le prix, le delta, le gamma, le vega, la vomma (volga)
+    et la vanna d'une option selon Black–Scholes.
+    (Les valeurs pour une option américaine sont une approximation.)
+    """
     from scipy.stats import norm
 
-    N = norm.cdf
+    N = norm.cdf   # fonction de répartition
+    n = norm.pdf   # densité de la loi normale
+
     d1 = (ma.log(S / K) + (r + sigma**2 / 2) * T) / (sigma * ma.sqrt(T))
     d2 = d1 - sigma * ma.sqrt(T)
+
+    # --- Prix et Delta ---
     if type_op == "Call":
-        return S * N(d1) - K * ma.exp(-r * T) * N(d2)
-    else:
-        return K * ma.exp(-r * T) * N(-d2) - S * N(-d1)
+        price = S * N(d1) - K * ma.exp(-r * T) * N(d2)
+        delta = N(d1)
+    else:  # Put
+        price = K * ma.exp(-r * T) * N(-d2) - S * N(-d1)
+        delta = N(d1) - 1
+
+    # --- Greeks ---
+    gamma = n(d1) / (S * sigma * ma.sqrt(T))
+    vega = S * n(d1) * ma.sqrt(T) / 100               # par 1 % de vol
+    vomma = (vega * d1 * d2 / sigma) / 100            # par (1%)² de vol
+    vanna = (-n(d1) * d2 / sigma) / 100               # par 1% de vol et 1 unité de spot
+
+    # --- Retour ---
+    return {
+        "price": price,
+        "delta": delta,
+        "gamma": gamma,
+        "vega": vega,
+        "vomma": vomma,
+        "vanna": vanna,
+        "note": "⚠️ Pour une option américaine, ces valeurs sont approximatives."
+                if exercice == "US" else "Option européenne : formules exactes."
+    }
 
 
-# ======================
-# 🔍 TEST COMPLET
-# ======================
+
+
 if __name__ == "__main__":
     t0 = datetime(2025, 9, 1)
     div_date = datetime(2026, 4, 21)
 
+    # 🔹 Paramètres du marché et du contrat
     market = Market(stock_price=100, int_rate=0.05, vol=0.3,
                     div_date=div_date, dividende=3.0)
     contract = Contract(strike=102, maturity=1.0, pricing_date=t0,
                         op_type="Call", op_exercice="US")
 
+    # 🔹 Étape 1 : Prix de base via l’arbre
     arbre = Arbre(market, contract, n_steps=400)
     price_tree = pricer(arbre)
-    price_bs = BS(market.stock_price, contract.strike, contract.maturity,
-                  market.int_rate, market.vol, contract.op_type)
 
-    print(f"\nOption {contract.op_type} {contract.op_exercice}")
+    # 🔹 Étape 2 : Calcul des prix pour le Delta/Gamma numérique
+    h = 0.1  # petite variation du prix du sous-jacent
+
+    # Prix avec S0 + h
+    market_up = Market(stock_price=market.stock_price + h,
+                       int_rate=market.int_rate,
+                       vol=market.vol,
+                       div_date=market.div_date,
+                       dividende=market.dividende)
+    arbre_up = Arbre(market_up, contract, n_steps=400)
+    price_up = pricer(arbre_up)
+
+    # Prix avec S0 - h
+    market_down = Market(stock_price=market.stock_price - h,
+                         int_rate=market.int_rate,
+                         vol=market.vol,
+                         div_date=market.div_date,
+                         dividende=market.dividende)
+    arbre_down = Arbre(market_down, contract, n_steps=400)
+    price_down = pricer(arbre_down)
+
+    # 🔹 Étape 3 : Deltas et Gamma numériques
+    delta_central = (price_up - price_down) / (2 * h)
+    delta_forward = (price_up - price_tree) / h
+    gamma_num = (price_up - 2 * price_tree + price_down) / (h ** 2)
+
+    # 🔹 Étape 4 : Vega et Volga numériques
+    h_vol = 0.01  # variation absolue de la volatilité = 1 %
+
+    market_up_vol = Market(stock_price=market.stock_price,
+                           int_rate=market.int_rate,
+                           vol=market.vol + h_vol,
+                           div_date=market.div_date,
+                           dividende=market.dividende)
+    arbre_up_vol = Arbre(market_up_vol, contract, n_steps=400)
+    price_up_vol = pricer(arbre_up_vol)
+
+    market_down_vol = Market(stock_price=market.stock_price,
+                             int_rate=market.int_rate,
+                             vol=market.vol - h_vol,
+                             div_date=market.div_date,
+                             dividende=market.dividende)
+    arbre_down_vol = Arbre(market_down_vol, contract, n_steps=400)
+    price_down_vol = pricer(arbre_down_vol)
+
+    vega_num = (price_up_vol - price_down_vol) / (2 * h_vol) / 100
+    vomma_num = (price_up_vol - 2 * price_tree + price_down_vol) / (h_vol ** 2) / (100 * 100)
+
+    # 🔹 Étape 5 : Vanna numérique (formule mixte centrée sur les prix)
+    # ---------------------------------------------------------------
+    # On calcule les 4 prix croisés : (S ± h, σ ± h_vol)
+
+    # Prix(S+h, σ+h)
+    market_Sup_vol_up = Market(stock_price=market.stock_price + h,
+                               int_rate=market.int_rate,
+                               vol=market.vol + h_vol,
+                               div_date=market.div_date,
+                               dividende=market.dividende)
+    price_Sup_vol_up = pricer(Arbre(market_Sup_vol_up, contract, n_steps=400))
+
+    # Prix(S-h, σ+h)
+    market_Sdn_vol_up = Market(stock_price=market.stock_price - h,
+                               int_rate=market.int_rate,
+                               vol=market.vol + h_vol,
+                               div_date=market.div_date,
+                               dividende=market.dividende)
+    price_Sdn_vol_up = pricer(Arbre(market_Sdn_vol_up, contract, n_steps=400))
+
+    # Prix(S+h, σ-h)
+    market_Sup_vol_dn = Market(stock_price=market.stock_price + h,
+                               int_rate=market.int_rate,
+                               vol=market.vol - h_vol,
+                               div_date=market.div_date,
+                               dividende=market.dividende)
+    price_Sup_vol_dn = pricer(Arbre(market_Sup_vol_dn, contract, n_steps=400))
+
+    # Prix(S-h, σ-h)
+    market_Sdn_vol_dn = Market(stock_price=market.stock_price - h,
+                               int_rate=market.int_rate,
+                               vol=market.vol - h_vol,
+                               div_date=market.div_date,
+                               dividende=market.dividende)
+    price_Sdn_vol_dn = pricer(Arbre(market_Sdn_vol_dn, contract, n_steps=400))
+
+    # --- Vanna numérique (par 1 % de vol)
+    vanna_num = (price_Sup_vol_up - price_Sdn_vol_up- price_Sup_vol_dn + price_Sdn_vol_dn) / (4 * h * h_vol * 100)
+
+
+
+
+
+
+    # 🔹 Étape 5 : Black–Scholes pour comparaison
+    bs = BS(market.stock_price, contract.strike, contract.maturity,
+            market.int_rate, market.vol, contract.op_type, contract.op_exercice)
+
+    # 🔹 Étape 6 : Affichage complet
+    print(f"\n==============================")
+    print(f"   OPTION {contract.op_type} {contract.op_exercice}")
+    print(f"==============================")
     print(f"Prix trinomial (avec dividende discret) : {price_tree:.6f}")
-    print(f"Prix Black–Scholes (sans dividende)     : {price_bs:.6f}")
+    print(f"Prix Black–Scholes (sans dividende)     : {bs['price']:.6f}")
+
+    print(f"\n--- 📊 Dérivées numériques (à partir de l'arbre) ---")
+    print(f"Delta numérique centré   : {delta_central:.6f}")
+    print(f"Delta numérique avant    : {delta_forward:.6f}")
+    print(f"Gamma numérique (centré) : {gamma_num:.6f}")
+    print(f"Vega numérique (arbre)   : {vega_num:.6f}")
+    print(f"Vomma numérique (arbre)  : {vomma_num:.6f}")
+    print(f"Vanna num: {vanna_num:.6f}")
+
+
+
+    print(f"\n--- 📈 Dérivées analytiques (Black–Scholes) ---")
+    print(f"Delta BS : {bs['delta']:.6f}")
+    print(f"Gamma BS : {bs['gamma']:.6f}")
+    print(f"Vega BS  : {bs['vega']:.6f}")
+    print(f"Vomma BS : {bs['vomma']:.6f}")
+    print(f"Vanna BS : {bs['vanna']:.6f}")
+
+    print(f"\nNote : {bs['note']}")
