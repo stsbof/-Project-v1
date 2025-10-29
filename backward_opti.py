@@ -2,6 +2,7 @@ import math as ma
 from datetime import datetime
 from scipy.stats import norm
 
+
 # ======================
 # 🔹 Classe Market
 # ======================
@@ -20,14 +21,23 @@ class Market:
 class Contract:
     def __init__(self, strike, maturity, pricing_date, op_type="Call", op_exercice="EU"):
         """
-        op_type: "Call" ou "Put"
-        op_exercice: "EU" ou "US"
+        maturity : soit un float (en années), soit une datetime (date d'échéance)
+        op_type : "Call" ou "Put"
+        op_exercice : "EU" ou "US"
         """
         self.strike = strike
-        self.maturity = maturity  # en années
         self.pricing_date = pricing_date
         self.op_type = op_type
         self.op_exercice = op_exercice
+
+        # ✅ Si maturity est une date, on calcule la durée en années
+        if isinstance(maturity, datetime):
+            self.maturity_date = maturity
+            self.maturity = (maturity - pricing_date).days / 365.0
+        else:
+            self.maturity_date = None
+            self.maturity = float(maturity)
+
 
 
 # ======================
@@ -35,19 +45,18 @@ class Contract:
 # ======================
 class Noeud:
     def __init__(self, v, arbre=None):
-        self.v = v                # prix du sous-jacent
-        self.v2 = None            # valeur de l'option
-        self.arbre = arbre        # référence vers l'arbre
-        self.next_mid = None      # mid du step suivant
-        self.voisin_up = None     # voisin haut du même step
-        self.voisin_down = None   # voisin bas du même step
-        self.voisin_behind = None # mid du step précédent
+        self.v = v
+        self.v2 = None
+        self.arbre = arbre
+        self.next_mid = None
+        self.voisin_up = None
+        self.voisin_down = None
+        self.voisin_behind = None
         self.proba_next_up = None
         self.proba_next_mid = None
         self.proba_next_down = None
 
     def move_up(self, alpha):
-        """Créer ou retourner le voisin supérieur."""
         if self.voisin_up is not None:
             return self.voisin_up
         else:
@@ -56,7 +65,6 @@ class Noeud:
             return self.voisin_up
 
     def move_down(self, alpha):
-        """Créer ou retourner le voisin inférieur."""
         if self.voisin_down is not None:
             return self.voisin_down
         else:
@@ -65,7 +73,6 @@ class Noeud:
             return self.voisin_down
 
     def add_probability(self, D):
-        """Calcule les probabilités (avec dividende D) selon les formules exactes."""
         r = self.arbre.market.int_rate
         dt = self.arbre.dt
         alpha = self.arbre.alpha
@@ -92,7 +99,6 @@ class Noeud:
         self.proba_next_down = p_down
 
     def good_next_mid(self, forward, last_next_mid, D):
-        """Construit le mid suivant, relie ses voisins, et calcule les proba locales."""
         alpha = self.arbre.alpha
         self.next_mid = find_next_mid(forward, alpha, last_next_mid)
         self.next_mid.voisin_behind = self
@@ -116,15 +122,13 @@ class Arbre:
         self.generer_arbre(n_steps)
 
     def generer_arbre(self, N):
-        """Construit l'arbre complet comme dans la version Excel, sans Excel."""
         market = self.market
         contract = self.contract
 
-        # Détection de la date du dividende
         if market.div_date is not None:
             T_div_date = (market.div_date - contract.pricing_date).days / 365.0
         else:
-            T_div_date = contract.maturity + 1000000  # jamais atteint
+            T_div_date = contract.maturity + 1000000
 
         S0 = market.stock_price
         r = market.int_rate
@@ -143,7 +147,6 @@ class Arbre:
 
             last_next_mid = Noeud(noeud_tronc.v * ma.exp(r * dt) - D, arbre=self)
 
-            # vers le haut
             noeud = noeud_tronc
             while noeud is not None:
                 last_next_mid = noeud.good_next_mid(
@@ -151,7 +154,6 @@ class Arbre:
                 )
                 noeud = noeud.voisin_up
 
-            # vers le bas
             noeud = noeud_tronc
             last_next_mid = noeud_tronc.next_mid
             while noeud is not None:
@@ -169,7 +171,6 @@ class Arbre:
 # 🔹 Fonctions utilitaires
 # ======================
 def find_next_mid(forward, alpha, node):
-    """Trouve le bon next_mid dont la valeur encadre le forward."""
     while forward > node.v * (1 + alpha) / 2:
         node = node.move_up(alpha)
     while forward <= node.v * (1 + 1 / alpha) / 2:
@@ -183,7 +184,6 @@ def find_next_mid(forward, alpha, node):
 # 🔹 Fonctions de pricing
 # ======================
 def comput_payoff(op_multiplicator, last_node, K):
-    """Applique le payoff à maturité."""
     current_node = last_node
     while current_node is not None:
         current_node.v2 = max((current_node.v - K) * op_multiplicator, 0)
@@ -195,7 +195,6 @@ def comput_payoff(op_multiplicator, last_node, K):
 
 
 def pricing(last_node, d_f, op_exercice, K, op_multiplicator):
-    """Backward induction par liens entre noeuds."""
     while last_node is not None:
         last_node = last_node.voisin_behind
         current_node = last_node
@@ -239,7 +238,6 @@ def pricing(last_node, d_f, op_exercice, K, op_multiplicator):
 
 
 def pricer(arbre):
-    """Fonction principale de pricing."""
     r = arbre.market.int_rate
     N = arbre.n_steps
     T = arbre.contract.maturity
@@ -256,41 +254,31 @@ def pricer(arbre):
 
     comput_payoff(op_multiplicator, last_node, K)
     pricing(last_node, d_f, op_exercice, K, op_multiplicator)
-    return arbre.racine.v2
+    return arbre
 
 
 # ======================
 # 🔹 Black–Scholes
 # ======================
 def BS(S, K, T, r, sigma, type_op, exercice="EU"):
-    """
-    Calcule le prix, le delta, le gamma, le vega, la vomma (volga)
-    et la vanna d'une option selon Black–Scholes.
-    (Les valeurs pour une option américaine sont une approximation.)
-    """
-    from scipy.stats import norm
+    N = norm.cdf
+    n = norm.pdf
 
-    N = norm.cdf   # fonction de répartition
-    n = norm.pdf   # densité de la loi normale
-
-    d1 = (ma.log(S / K) + (r + sigma**2 / 2) * T) / (sigma * ma.sqrt(T))
+    d1 = (ma.log(S / K) + (r + sigma ** 2 / 2) * T) / (sigma * ma.sqrt(T))
     d2 = d1 - sigma * ma.sqrt(T)
 
-    # --- Prix et Delta ---
     if type_op == "Call":
         price = S * N(d1) - K * ma.exp(-r * T) * N(d2)
         delta = N(d1)
-    else:  # Put
+    else:
         price = K * ma.exp(-r * T) * N(-d2) - S * N(-d1)
         delta = N(d1) - 1
 
-    # --- Greeks ---
     gamma = n(d1) / (S * sigma * ma.sqrt(T))
-    vega = S * n(d1) * ma.sqrt(T) / 100               # par 1 % de vol
-    vomma = (vega * d1 * d2 / sigma) / 100            # par (1%)² de vol
-    vanna = (-n(d1) * d2 / sigma) / 100               # par 1% de vol et 1 unité de spot
+    vega = S * n(d1) * ma.sqrt(T) / 100
+    vomma = (vega * d1 * d2 / sigma) / 100
+    vanna = (-n(d1) * d2 / sigma) / 100
 
-    # --- Retour ---
     return {
         "price": price,
         "delta": delta,
@@ -303,140 +291,89 @@ def BS(S, K, T, r, sigma, type_op, exercice="EU"):
     }
 
 
+# ======================
+# 🔹 Calcul du Delta à partir de l’arbre
+# ======================
+def delta_from_tree(arbre, step=2):
+    node = arbre.racine
+    for _ in range(step):
+        if node.next_mid is None:
+            return None
+        node = node.next_mid
+
+    node_up = node.voisin_up
+    node_down = node.voisin_down
+    if node_up is None or node_down is None:
+        return None
+
+    S_up, S_down = node_up.v, node_down.v
+    V_up, V_down = node_up.v2, node_down.v2
+    delta = (V_up - V_down) / (S_up - S_down)
+
+    return delta, (S_up, S_down, V_up, V_down)
 
 
+def vega_from_tree(market, contract, n_steps=400, bump=0.01):
+    """
+    Calcule le Vega numérique à partir de l’arbre :
+    Vega ≈ (V(sigma + bump) - V(sigma - bump)) / (2 * bump)
+    bump exprimé en décimal (ex: 0.01 = 1%)
+    """
+    sigma0 = market.vol
+
+    # Monte un arbre avec sigma + bump
+    market_up = Market(market.stock_price, market.int_rate, sigma0 + bump,
+                       market.div_date, market.dividende)
+    arbre_up = pricer(Arbre(market_up, contract, n_steps))
+    price_up = arbre_up.racine.v2
+
+    # Monte un arbre avec sigma - bump
+    market_down = Market(market.stock_price, market.int_rate, sigma0 - bump,
+                         market.div_date, market.dividende)
+    arbre_down = pricer(Arbre(market_down, contract, n_steps))
+    price_down = arbre_down.racine.v2
+
+    # Approximation du Vega
+    vega_tree = (price_up - price_down) / (2 * bump) / 100  # divisé par 100 pour exprimer en "par %"
+    return vega_tree
+
+
+
+# ======================
+# 🔹 Programme principal
+# ======================
 if __name__ == "__main__":
     t0 = datetime(2025, 9, 1)
     div_date = datetime(2026, 4, 21)
 
-    # 🔹 Paramètres du marché et du contrat
-    market = Market(stock_price=100, int_rate=0.05, vol=0.3,
-                    div_date=div_date, dividende=3.0)
-    contract = Contract(strike=102, maturity=1.0, pricing_date=t0,
-                        op_type="Call", op_exercice="US")
+    market = Market(100, 0.05, 0.3, div_date, 3.0)
+    contract = Contract(102, datetime(2026, 9, 1), t0, "Call", "US")
 
-    # 🔹 Étape 1 : Prix de base via l’arbre
-    arbre = Arbre(market, contract, n_steps=400)
-    price_tree = pricer(arbre)
-
-    # 🔹 Étape 2 : Calcul des prix pour le Delta/Gamma numérique
-    h = 0.1  # petite variation du prix du sous-jacent
-
-    # Prix avec S0 + h
-    market_up = Market(stock_price=market.stock_price + h,
-                       int_rate=market.int_rate,
-                       vol=market.vol,
-                       div_date=market.div_date,
-                       dividende=market.dividende)
-    arbre_up = Arbre(market_up, contract, n_steps=400)
-    price_up = pricer(arbre_up)
-
-    # Prix avec S0 - h
-    market_down = Market(stock_price=market.stock_price - h,
-                         int_rate=market.int_rate,
-                         vol=market.vol,
-                         div_date=market.div_date,
-                         dividende=market.dividende)
-    arbre_down = Arbre(market_down, contract, n_steps=400)
-    price_down = pricer(arbre_down)
-
-    # 🔹 Étape 3 : Deltas et Gamma numériques
-    delta_central = (price_up - price_down) / (2 * h)
-    delta_forward = (price_up - price_tree) / h
-    gamma_num = (price_up - 2 * price_tree + price_down) / (h ** 2)
-
-    # 🔹 Étape 4 : Vega et Volga numériques
-    h_vol = 0.01  # variation absolue de la volatilité = 1 %
-
-    market_up_vol = Market(stock_price=market.stock_price,
-                           int_rate=market.int_rate,
-                           vol=market.vol + h_vol,
-                           div_date=market.div_date,
-                           dividende=market.dividende)
-    arbre_up_vol = Arbre(market_up_vol, contract, n_steps=400)
-    price_up_vol = pricer(arbre_up_vol)
-
-    market_down_vol = Market(stock_price=market.stock_price,
-                             int_rate=market.int_rate,
-                             vol=market.vol - h_vol,
-                             div_date=market.div_date,
-                             dividende=market.dividende)
-    arbre_down_vol = Arbre(market_down_vol, contract, n_steps=400)
-    price_down_vol = pricer(arbre_down_vol)
-
-    vega_num = (price_up_vol - price_down_vol) / (2 * h_vol) / 100
-    vomma_num = (price_up_vol - 2 * price_tree + price_down_vol) / (h_vol ** 2) / (100 * 100)
-
-    # 🔹 Étape 5 : Vanna numérique (formule mixte centrée sur les prix)
-    # ---------------------------------------------------------------
-    # On calcule les 4 prix croisés : (S ± h, σ ± h_vol)
-
-    # Prix(S+h, σ+h)
-    market_Sup_vol_up = Market(stock_price=market.stock_price + h,
-                               int_rate=market.int_rate,
-                               vol=market.vol + h_vol,
-                               div_date=market.div_date,
-                               dividende=market.dividende)
-    price_Sup_vol_up = pricer(Arbre(market_Sup_vol_up, contract, n_steps=400))
-
-    # Prix(S-h, σ+h)
-    market_Sdn_vol_up = Market(stock_price=market.stock_price - h,
-                               int_rate=market.int_rate,
-                               vol=market.vol + h_vol,
-                               div_date=market.div_date,
-                               dividende=market.dividende)
-    price_Sdn_vol_up = pricer(Arbre(market_Sdn_vol_up, contract, n_steps=400))
-
-    # Prix(S+h, σ-h)
-    market_Sup_vol_dn = Market(stock_price=market.stock_price + h,
-                               int_rate=market.int_rate,
-                               vol=market.vol - h_vol,
-                               div_date=market.div_date,
-                               dividende=market.dividende)
-    price_Sup_vol_dn = pricer(Arbre(market_Sup_vol_dn, contract, n_steps=400))
-
-    # Prix(S-h, σ-h)
-    market_Sdn_vol_dn = Market(stock_price=market.stock_price - h,
-                               int_rate=market.int_rate,
-                               vol=market.vol - h_vol,
-                               div_date=market.div_date,
-                               dividende=market.dividende)
-    price_Sdn_vol_dn = pricer(Arbre(market_Sdn_vol_dn, contract, n_steps=400))
-
-    # --- Vanna numérique (par 1 % de vol)
-    vanna_num = (price_Sup_vol_up - price_Sdn_vol_up- price_Sup_vol_dn + price_Sdn_vol_dn) / (4 * h * h_vol * 100)
-
-
-
-
-
-
-    # 🔹 Étape 5 : Black–Scholes pour comparaison
+    arbre = pricer(Arbre(market, contract, 400))
+    price_tree = arbre.racine.v2
     bs = BS(market.stock_price, contract.strike, contract.maturity,
             market.int_rate, market.vol, contract.op_type, contract.op_exercice)
 
-    # 🔹 Étape 6 : Affichage complet
-    print(f"\n==============================")
+    # --- Delta basique à partir du 2e step ---
+    delta_tree, (S_up, S_down, V_up, V_down) = delta_from_tree(arbre, step=2)
+
+    print("\n==============================")
     print(f"   OPTION {contract.op_type} {contract.op_exercice}")
-    print(f"==============================")
-    print(f"Prix trinomial (avec dividende discret) : {price_tree:.6f}")
-    print(f"Prix Black–Scholes (sans dividende)     : {bs['price']:.6f}")
+    print("==============================")
+    print(f"Prix trinomial : {price_tree:.6f}")
+    print(f"Prix Black–Scholes : {bs['price']:.6f}")
 
-    print(f"\n--- 📊 Dérivées numériques (à partir de l'arbre) ---")
-    print(f"Delta numérique centré   : {delta_central:.6f}")
-    print(f"Delta numérique avant    : {delta_forward:.6f}")
-    print(f"Gamma numérique (centré) : {gamma_num:.6f}")
-    print(f"Vega numérique (arbre)   : {vega_num:.6f}")
-    print(f"Vomma numérique (arbre)  : {vomma_num:.6f}")
-    print(f"Vanna num: {vanna_num:.6f}")
+    print(f"\n--- 📉 Delta basique (à partir du 2ᵉ step) ---")
+    print(f"S_up = {S_up:.4f}, S_down = {S_down:.4f}")
+    print(f"V_up = {V_up:.6f}, V_down = {V_down:.6f}")
+    print(f"➡️ Delta (arbre) = {delta_tree:.6f}")
 
-
-
-    print(f"\n--- 📈 Dérivées analytiques (Black–Scholes) ---")
+    print(f"\n--- 📈 Delta analytique (Black–Scholes) ---")
     print(f"Delta BS : {bs['delta']:.6f}")
-    print(f"Gamma BS : {bs['gamma']:.6f}")
-    print(f"Vega BS  : {bs['vega']:.6f}")
-    print(f"Vomma BS : {bs['vomma']:.6f}")
-    print(f"Vanna BS : {bs['vanna']:.6f}")
-
     print(f"\nNote : {bs['note']}")
+    # --- Vega numérique à partir de l’arbre ---
+    vega_tree = vega_from_tree(market, contract, 400)
+
+    print(f"\n--- 🌪 Vega ---")
+    print(f"Vega (arbre trinomial) ≈ {vega_tree:.6f}")
+    print(f"Vega (Black–Scholes)  = {bs['vega']:.6f}")
