@@ -3,9 +3,7 @@ from datetime import datetime
 from scipy.stats import norm
 
 
-# ======================
-# 🔹 Classe Market
-# ======================
+
 class Market:
     def __init__(self, stock_price, int_rate, vol, div_date=None, dividende=0.0):
         self.stock_price = stock_price
@@ -15,9 +13,7 @@ class Market:
         self.dividende = dividende
 
 
-# ======================
-# 🔹 Classe Contract (Option)
-# ======================
+
 class Contract:
     def __init__(self, strike, maturity, pricing_date, op_type="Call", op_exercice="EU"):
         """
@@ -30,7 +26,7 @@ class Contract:
         self.op_type = op_type
         self.op_exercice = op_exercice
 
-        # ✅ Si maturity est une date, on calcule la durée en années
+        # Si maturity est une date, on calcule la durée en années
         if isinstance(maturity, datetime):
             self.maturity_date = maturity
             self.maturity = (maturity - pricing_date).days / 365.0
@@ -39,9 +35,7 @@ class Contract:
             self.maturity = float(maturity)
 
 
-# ======================
-# 🔹 Classe Noeud (Node) - Optimisée
-# ======================
+
 class Noeud:
     __slots__ = ['v', 'v2', 'arbre', 'next_mid', 'voisin_up', 'voisin_down',
                  'voisin_behind', 'proba_next_up', 'proba_next_mid', 'proba_next_down',
@@ -111,9 +105,7 @@ class Noeud:
         return self.next_mid
 
 
-# ======================
-# 🔹 Classe Arbre - Optimisée avec vrai pruning
-# ======================
+
 class Arbre:
     def __init__(self, market, contract, n_steps, pruning_threshold=1e-15):
         """
@@ -260,9 +252,7 @@ class Arbre:
             node = node.voisin_down
 
 
-# ======================
-# 🔹 Fonctions utilitaires
-# ======================
+
 def find_next_mid(forward, alpha, node):
     threshold_up = (1 + alpha) / 2
     threshold_down = (1 + 1 / alpha) / 2
@@ -276,9 +266,7 @@ def find_next_mid(forward, alpha, node):
     return node
 
 
-# ======================
-# 🔹 Fonctions de pricing - Optimisées
-# ======================
+
 def comput_payoff(op_multiplicator, last_node, K):
     current_node = last_node
     while current_node is not None:
@@ -357,9 +345,6 @@ def pricer(arbre):
     return arbre
 
 
-# ======================
-# 🔹 Black–Scholes
-# ======================
 def BS(S, K, T, r, sigma, type_op, exercice="EU"):
     N = norm.cdf
     n = norm.pdf
@@ -391,9 +376,8 @@ def BS(S, K, T, r, sigma, type_op, exercice="EU"):
     }
 
 
-# ======================
-# 🔹 Calcul du Delta à partir de l'arbre
-# ======================
+
+
 def delta_from_tree(arbre, step=2):
     node = arbre.racine
     for _ in range(step):
@@ -435,7 +419,7 @@ def vega_from_tree(market, contract, n_steps=400, bump=0.01, pruning_threshold=1
 
 
 # ======================
-# 🔹 Programme principal
+#  Programme principal
 # ======================
 if __name__ == "__main__":
     import time
@@ -491,3 +475,4 @@ if __name__ == "__main__":
     print(f"⏱️  Temps d'exécution Vega : {elapsed_time_vega:.4f} secondes")
 
     print("\n" + "=" * 60)
+
