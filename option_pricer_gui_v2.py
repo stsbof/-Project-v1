@@ -8,9 +8,6 @@ from PySide6.QtCore import Qt
 import sys
 
 
-# =========================================================
-# 🔹 Classes financières
-# =========================================================
 class Market:
     def __init__(self, stock_price, int_rate, vol, div_date=None, dividende=0.0):
         self.stock_price = stock_price
@@ -34,9 +31,7 @@ class Contract:
             raise ValueError("maturity doit être un nombre (années) ou une datetime")
 
 
-# =========================================================
-# 🔹 Arbre trinomial complet
-# =========================================================
+
 class Noeud:
     def __init__(self, v, arbre=None):
         self.v = v
@@ -228,9 +223,6 @@ def pricer(arbre):
     return arbre.racine.v2
 
 
-# =========================================================
-# 🔹 Greeks numériques via l’arbre
-# =========================================================
 def compute_greeks(market, contract, n_steps, h=0.1, h_vol=0.01):
     base = pricer(Arbre(market, contract, n_steps))
 
@@ -258,9 +250,7 @@ def compute_greeks(market, contract, n_steps, h=0.1, h_vol=0.01):
     }
 
 
-# =========================================================
-# 🔹 Interface graphique simplifiée (sans graphe)
-# =========================================================
+
 class OptionPricerGUI(QWidget):
     def __init__(self):
         super().__init__()
@@ -456,11 +446,12 @@ class OptionPricerGUI(QWidget):
 
 
 # =========================================================
-# 🔹 Lancement de l'application
+#  Lancement de l'application
 # =========================================================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = OptionPricerGUI()
     window.show()
     sys.exit(app.exec())
+
 
